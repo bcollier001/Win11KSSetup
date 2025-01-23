@@ -8,6 +8,8 @@ $global:OutlookLoggedIn = $false
 $global:OneDriveLoggedIn = $false
 $global:SoftwareInstalled = $false
 
+Clear-Host
+
 Write-Host "=+=+=+=+=+=+="
 Write-Host "User: $env:username" -ForegroundColor Cyan
 Write-Host "Serial: $((Get-WmiObject -Class Win32_BIOS).SerialNumber)" -ForegroundColor Cyan
@@ -223,7 +225,7 @@ if (($64BitInstalled.Count -lt $64BitSoftware.Count) -or ($32BitInstalled.Count 
     if ($shortcuts.Exists -contains $false){
         Write-Warning "Not all shortcuts are on the desktop. Software may not be installed completely. Please open Software Center and confirm."
         Write-host "Missing Shortcuts:" -ForegroundColor Red
-        Write-Host $($shortcuts | Where-Object {!$_.Exists} | Select-Object -ExpandProperty Name) -join "`n"
+        Write-Host $((shortcuts | Where-Object {!$_.Exists} | Select-Object -ExpandProperty Name) -join "`n")
     } else {
         $global:SoftwareInstalled = $true
         Write-Host "All software is installed." -ForegroundColor Green
