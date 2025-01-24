@@ -67,7 +67,10 @@ function Get-VPNStatus {
 }
 
 function Get-WorkAccountArray {
-    return (dsregcmd /listaccounts | select-string -Pattern "Account:")
+    $accounts = dsregcmd /listaccounts
+    $appAccIndex = [array]::IndexOf($accounts, "Application accounts:")
+    $workaccountarray = $accounts | Select-Object -First $appAccIndex | Select-String -Pattern "^Account:"
+    return $workaccountarray
 }
 
 function Get-Certs {
