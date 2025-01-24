@@ -1,19 +1,3 @@
-
-####################
-# Global Variables #
-####################
-
-$global:VPNConnected = $false
-$global:BitLockerEnabled = $false
-$global:BitLockerEncrypting = $false
-$global:BitLockerPercentage = 0
-$global:WorkAccountAdded = $false
-$global:VPNCertsExist = $false
-$global:OutlookLoggedIn = $false
-$global:OneDriveLoggedIn = $false
-$global:SoftwareInstalled = $false
-$global:StepSkipped = $false
-
 ############################
 # Powershell Console Check #
 ############################
@@ -36,6 +20,21 @@ if ($host.Name -ne "ConsoleHost") {
     Exit
 }
 
+
+####################
+# Global Variables #
+####################
+
+$global:VPNConnected = $false
+$global:BitLockerEnabled = $false
+$global:BitLockerEncrypting = $false
+$global:BitLockerPercentage = 0
+$global:WorkAccountAdded = $false
+$global:VPNCertsExist = $false
+$global:OutlookLoggedIn = $false
+$global:OneDriveLoggedIn = $false
+$global:SoftwareInstalled = $false
+$global:StepSkipped = $false
 
 
 #############
@@ -111,6 +110,7 @@ function Get-BitLockerStatus {
         $global:BitLockerEncrypting = $true
     }
 }
+
 
 #############
 # Main Loop #
@@ -201,6 +201,7 @@ do {
             }
             Write-host "Refreshing VPN for new certs"
             Stop-Service -Name pangps
+            $global:VPNConnected = $false
             Remove-Item -Path "HKLM:\SOFTWARE\Palo Alto Networks\GlobalProtect\Settings" -Recurse -Force
             Start-Service -Name pangps
             Write-Host "Waiting 10 seconds for VPN service..."
