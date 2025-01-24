@@ -270,7 +270,7 @@ do {
         if ($shortcuts.Exists -contains $false) {
             Write-Warning "Not all shortcuts are on the desktop. Software may not be installed completely. Please open Software Center and confirm."
             Write-host "Missing Shortcuts:" -ForegroundColor Red
-            Write-Host $((shortcuts | Where-Object { !$_.Exists } | Select-Object -ExpandProperty Name) -join "`n")
+            Write-Host $(($shortcuts | Where-Object { !$_.Exists } | Select-Object -ExpandProperty Name) -join "`n")
         }
         else {
             $global:SoftwareInstalled = $true
