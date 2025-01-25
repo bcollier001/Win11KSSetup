@@ -2,7 +2,7 @@
 # Powershell Console Check #
 ############################
 if ($host.Name -ne "ConsoleHost") {
-    Start-Process PowerShell -ArgumentList "-Command ""iwr 'https://shorturl.at/nQ7Q8' | iex""" -Verb RunAs
+    Start-Process "$Env:SystemRoot\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-Command ""iwr 'https://shorturl.at/nQ7Q8' | iex""" -Verb RunAs
     Exit
 }
 
@@ -11,16 +11,17 @@ if ($host.Name -ne "ConsoleHost") {
 # Global Variables #
 ####################
 
-$global:VPNConnected = $false
-$global:BitLockerEnabled = $false
-$global:BitLockerEncrypting = $false
+$global:VPNRequired = $True
+$global:VPNConnected = $False
+$global:BitLockerEnabled = $False
+$global:BitLockerEncrypting = $False
 $global:BitLockerPercentage = 0
-$global:WorkAccountAdded = $false
-$global:VPNCertsExist = $false
-$global:OutlookLoggedIn = $false
-$global:OneDriveLoggedIn = $false
-$global:SoftwareInstalled = $false
-$global:StepSkipped = $false
+$global:WorkAccountAdded = $False
+$global:VPNCertsExist = $False
+$global:OutlookLoggedIn = $False
+$global:OneDriveLoggedIn = $False
+$global:SoftwareInstalled = $False
+$global:StepSkipped = $False
 
 
 #############
@@ -28,13 +29,13 @@ $global:StepSkipped = $false
 #############
 
 function Watch-SkipKey {
-    $global:StepSkipped = $false
+    $global:StepSkipped = $False
     if ($Host.UI.RawUI.KeyAvailable) {
         # Read the key and check if it's 's'
         $key = $Host.UI.RawUI.ReadKey("NoEcho, IncludeKeyDown, IncludeKeyUp").Character
         if ($key -ieq 's') {
             Write-Host "Skipping..."
-            $global:StepSkipped = $true
+            $global:StepSkipped = $True
             break
         }
     }
@@ -70,7 +71,7 @@ function Get-PublicShortcuts {
 function Get-VPNStatus {
     $global:PANGPAdapter = Get-NetAdapter | Where-Object { $_.InterfaceDescription -like "PANGP*" }
     if ($global:PANGPAdapter.Status -eq "Up") {
-        $global:VPNConnected = $true
+        $global:VPNConnected = $True
     }
     return $global:PANGPAdapter.Status
 }
@@ -90,10 +91,10 @@ function Get-BitLockerStatus {
     [string]$BitLockerStatus = (manage-bde -status C: | Select-String -Pattern "Conversion Status:").tostring().split(":").trim()[-1]
     [int]$global:BitLockerPercentage = (manage-bde -status C: | Select-String -Pattern "Percentage").tostring().split(":.")[1].trim()
     if ($BitLockerStatus -eq "Fully Encrypted") {
-        $global:BitLockerEnabled = $true
+        $global:BitLockerEnabled = $True
     }
     if (($global:BitLockerPercentage -gt 0) -and ($global:BitLockerPercentage -lt 100)) {
-        $global:BitLockerEncrypting = $true
+        $global:BitLockerEncrypting = $True
     }
 }
 
@@ -111,6 +112,12 @@ do {
     Write-Host "Serial: $((Get-WmiObject -Class Win32_BIOS).SerialNumber)" -ForegroundColor Cyan
     Write-Host "=+=+=+=+=+=+=+="
     Write-Host
+
+    if ($False <# Connected to Keysight network #>){
+        $global:VPNRequired = $False
+    } else {
+        $global:VPNRequired = $True
+    }
 
     Write-host "---- VPN ----" -ForegroundColor Magenta
     $VPNStatus = Get-VPNStatus
@@ -131,7 +138,7 @@ do {
     Write-Host "---- Work Account ----" -ForegroundColor Magenta
     $workaccountarray = Get-WorkAccountArray
     if ($null -ne $workaccountarray) {
-        $global:WorkAccountAdded = $true
+        $global:WorkAccountAdded = $True
         foreach ($account in $workaccountarray) {
             write-host $account.tostring().split(",")[-2].trim() -ForegroundColor Green
         }
@@ -146,7 +153,7 @@ do {
             Start-Sleep -Seconds 3
         }
         if (!$global:StepSkipped) {
-            $global:WorkAccountAdded = $true
+            $global:WorkAccountAdded = $True
             foreach ($account in $workaccountarray) {
                 write-host $account.tostring().split(",")[-2].trim()
             }
@@ -157,14 +164,15 @@ do {
     Write-Host "---- Certificates ----" -ForegroundColor Magenta
     $certs = Get-Certs
     if ($certs) {
-        $global:VPNCertsExist = $true
+        $global:VPNCertsExist = $True
         foreach ($cert in $certs) {
             Write-host "$($cert.DnsNameList.Punycode) - $($cert.Thumbprint)" -ForegroundColor Green
         }
     }
     else {
-        #Connect to VPN first
-        if (!$global:VPNConnected) {
+        #Connect to VPN first if not on Keysight Network
+
+        if (!$global:VPNConnected -and $global:VPNRequired) {
             Write-host "Connect to VPN to request certificates or press 'S' to skip"
             Start-Process -FilePath "C:\Program Files\Palo Alto Networks\GlobalProtect\PanGPA.exe"
             while ($VPNStatus -ne "Up") {
@@ -181,13 +189,13 @@ do {
                 $certs = Get-Certs
                 Start-Sleep -s 3
             }
-            $global:VPNCertsExist = $true
+            $global:VPNCertsExist = $True
             foreach ($cert in $certs) {
                 Write-host "$($cert.DnsNameList.Punycode) - $($cert.Thumbprint)"
             }
             Write-host "Refreshing VPN for new certs"
             Stop-Service -Name pangps
-            $global:VPNConnected = $false
+            $global:VPNConnected = $False
             Remove-Item -Path "HKLM:\SOFTWARE\Palo Alto Networks\GlobalProtect\Settings" -Recurse -Force
             Start-Service -Name pangps
             Write-Host "Waiting 10 seconds for VPN service..."
@@ -225,7 +233,7 @@ do {
     [void]$(Get-VPNStatus)
     if (!$global:BitLockerEnabled -and !$global:BitLockerEncrypting) {
         #Connect to VPN first
-        if (!$global:VPNConnected) {
+        if (!$global:VPNConnected -and $global:VPNRequired) {
             Write-host "Connect to VPN to enable Bit-Locker or press 'S' to skip"
             Start-Process -FilePath "C:\Program Files\Palo Alto Networks\GlobalProtect\PanGPA.exe"
             while ($VPNStatus -ne "Up") {
@@ -281,13 +289,13 @@ do {
     }
     else {
         $shortcuts = Get-PublicShortcuts
-        if ($shortcuts.Exists -contains $false) {
+        if ($shortcuts.Exists -contains $False) {
             Write-Warning "Not all shortcuts are on the desktop. Software may not be installed completely. Please open Software Center and confirm."
             Write-host "Missing Shortcuts:" -ForegroundColor Red
             Write-Host $(($shortcuts | Where-Object { !$_.Exists } | Select-Object -ExpandProperty Name) -join "`n")
         }
         else {
-            $global:SoftwareInstalled = $true
+            $global:SoftwareInstalled = $True
             Write-Host "All software is installed." -ForegroundColor Green
         }
     }
@@ -305,7 +313,7 @@ do {
             # Fetch the email account details
             $emailAccount = Get-ItemProperty -Path $_.PSPath | Select-Object -ExpandProperty "Account Name" -ErrorAction SilentlyContinue
             if ($emailAccount -and ($emailAccount -ne "Outlook Address Book")) {
-                $global:OutlookLoggedIn = $true
+                $global:OutlookLoggedIn = $True
                 Write-Host "$emailAccount" -ForegroundColor Green
             }
         }
@@ -321,7 +329,7 @@ do {
     if (Test-Path -Path $onedriveRegistryPath) {
         $account = Get-ItemProperty -Path $onedriveRegistryPath | Select-Object "UserName", "UserEmail"
         if ($account.UserEmail) {
-            $global:OneDriveLoggedIn = $true
+            $global:OneDriveLoggedIn = $True
             Write-host "$($account.UserName) - $($account.UserEmail)" -ForegroundColor Green
         }
         else {
