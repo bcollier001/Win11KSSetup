@@ -6,13 +6,23 @@ if ($host.Name -ne "ConsoleHost") {
     Exit
 }
 
-
 ####################
 # Global Variables #
 ####################
 
+
+Write-Host "Choose a country profile:`n1. Japan`n2. No Profile (Default)"
+$CountrySelect = Read-Host -Prompt "Choice"
+
+switch ($CountrySelect) {
+    "1" { $global:Country = "Japan" }
+    "2" { $global:Country = "Default" }
+    Default { $global:Country = "Default" }
+}
+
 $global:VPNRequired = $True
 $global:VPNConnected = $False
+$global:VPNReset = $False
 $global:BitLockerEnabled = $False
 $global:BitLockerEncrypting = $False
 $global:BitLockerPercentage = 0
@@ -27,6 +37,17 @@ $global:StepSkipped = $False
 #############
 # Functions #
 #############
+
+function Reset-VPN {
+    Write-host "Refreshing VPN for new certs"
+    Stop-Service -Name pangps
+    Remove-Item -Path "HKLM:\SOFTWARE\Palo Alto Networks\GlobalProtect\Settings" -Recurse -Force
+    Start-Service -Name pangps
+    Write-Host "Waiting 10 seconds for VPN service..."
+    start-sleep -Seconds 10
+    $global:VPNReset = $True
+    $global:VPNConnected = $False
+}
 
 function Watch-SkipKey {
     $global:StepSkipped = $False
@@ -72,8 +93,11 @@ function Get-VPNStatus {
     $global:PANGPAdapter = Get-NetAdapter | Where-Object { $_.InterfaceDescription -like "PANGP*" }
     if ($global:PANGPAdapter.Status -eq "Up") {
         $global:VPNConnected = $True
+        return $true
     }
-    return $global:PANGPAdapter.Status
+    else {
+        return $false
+    }
 }
 
 function Get-WorkAccountArray {
@@ -98,6 +122,41 @@ function Get-BitLockerStatus {
     }
 }
 
+function Set-JapanKB {
+    try {
+        $registryPath = "HKLM:\SYSTEM\CurrentControlSet\Services\i8042prt\Parameters"
+        $propertyName = "LayerDriver JPN"
+        $newValue = "kbd106.dll"
+        Set-ItemProperty -Path $registryPath -Name $propertyName -Value $newValue
+        
+        $registryPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Keyboard Layouts\00000411"
+        $propertyName = "Layout File"
+        $newValue = "KBD106.dll"
+        Set-ItemProperty -Path $registryPath -Name $propertyName -Value $newValue
+
+        return $true
+    }
+    catch {
+        return $False
+    }
+}
+
+function Get-IMEJPDictFiles {
+    $dictFiles = Get-ChildItem -Path "C:\Windows\IME\IMEJP\DICTS" | Select-Object -ExpandProperty Name
+    $requiredFiles = @("IMJPPSGF.FIL", "imjptk.dic", "IMJPZP.DIC", "mshwjpnrIME.dll", "SDDS0411.DIC")
+    if (@($requiredFiles | Where-Object { $_ -notin $dictFiles }).Count -eq 0) {
+        return $True
+    }
+    else {
+        return $false
+    }
+}
+
+function Get-SetRegion {
+    return Get-ItemProperty -Path "HKCU:\Control Panel\International\Geo" -Name Name | Select-Object -ExpandProperty Name # eq to JP
+}
+
+#Set-TimeZone -Id "Tokyo Standard Time"
 
 #############
 # Main Loop #
@@ -107,31 +166,53 @@ do {
 
     Clear-Host
 
+    $global:VPNReset = $False
+
     Write-Host "=+=+=+=+=+=+=+="
     Write-Host "User: $env:username" -ForegroundColor Cyan
     Write-Host "Serial: $((Get-WmiObject -Class Win32_BIOS).SerialNumber)" -ForegroundColor Cyan
     Write-Host "=+=+=+=+=+=+=+="
     Write-Host
 
-    if ($False <# Connected to Keysight network #>){
-        $global:VPNRequired = $False
-    } else {
-        $global:VPNRequired = $True
+    $VPNStatus = Get-VPNStatus
+    if (!$VPNStatus) {
+        $computerName = "192.25.42.28"
+        $maxRetries = 3
+        $retryCount = 0
+
+        while ($retryCount -lt $maxRetries) {
+            $ksping = Test-Connection -ComputerName $computerName -Count 1 -Quiet
+        
+            if ($ksping) {
+                Write-Host "Connection successful to Keysight Network" -ForegroundColor Green
+                $global:VPNRequired = $False
+                break
+            }
+            else {
+                Write-Host "Attempt $(($retryCount + 1)) failed. Retrying..." -ForegroundColor Yellow
+                $retryCount++
+                Start-Sleep -Seconds 2  # Wait before retrying
+            }
+        }
+
+        if (-not $ksping) {
+            $global:VPNRequired = $True
+        }
     }
 
     Write-host "---- VPN ----" -ForegroundColor Magenta
     $VPNStatus = Get-VPNStatus
-    if ($VPNStatus -eq "Up") {
+    if ($VPNStatus) {
         $VPNIP = (Get-NetIPAddress -InterfaceAlias $global:PANGPAdapter.Name).IPAddress
         $portalRegPath = "HKLM:\SOFTWARE\Palo Alto Networks\GlobalProtect\PanSetup"
         $portalKeyName = "Portal"
         $portalValue = (Get-ItemProperty -Path $portalRegPath -Name $portalKeyName).$portalKeyName
-        Write-host "Status: $($VPNStatus)" -ForegroundColor Green
+        Write-host "Status: $($global:PANGPAdapter.Status)" -ForegroundColor Green
         Write-Host "Portal: $portalValue"
         Write-Host "IP: $VPNIP"
     }
     else {
-        Write-host "Status: $($VPNStatus)" -ForegroundColor Yellow
+        Write-host "Status: $($global:PANGPAdapter.Status)" -ForegroundColor Yellow
     }
     Write-Host
 
@@ -175,7 +256,7 @@ do {
         if (!$global:VPNConnected -and $global:VPNRequired) {
             Write-host "Connect to VPN to request certificates or press 'S' to skip"
             Start-Process -FilePath "C:\Program Files\Palo Alto Networks\GlobalProtect\PanGPA.exe"
-            while ($VPNStatus -ne "Up") {
+            while ($VPNStatus) {
                 $VPNStatus = Get-VPNStatus
                 Start-Sleep -Seconds 3
                 Watch-SkipKey
@@ -193,18 +274,63 @@ do {
             foreach ($cert in $certs) {
                 Write-host "$($cert.DnsNameList.Punycode) - $($cert.Thumbprint)"
             }
-            Write-host "Refreshing VPN for new certs"
-            Stop-Service -Name pangps
-            $global:VPNConnected = $False
-            Remove-Item -Path "HKLM:\SOFTWARE\Palo Alto Networks\GlobalProtect\Settings" -Recurse -Force
-            Start-Service -Name pangps
-            Write-Host "Waiting 10 seconds for VPN service..."
-            start-sleep -Seconds 10
+            Reset-VPN
         }
     }
     Write-host
 
+    ## SOFTWARE CHECK ##
+    Write-Host "---- Software ----" -ForegroundColor Magenta
+    $missingSoftware = @()
+    $64BitSoftPath = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*"
+    $64BitSoftware = @("FortiClient VPN", "GlobalProtect", "Microsoft 365 Apps for enterprise")
+    if ($global:Country -eq "Japan") { $64BitSoftware += "Microsoft 365 Apps for enterprise - ja-jp" }
+    $64BitInstalled = @()
+    foreach ($software in $64BitSoftware) {
+        $installed = Get-ItemProperty -Path $64BitSoftPath | Where-Object { $_.DisplayName -like "$software*" } | Select-Object -Property DisplayName, DisplayVersion
+        if ($installed) {
+            $64BitInstalled += $installed
+        } else {
+            $missingSoftware += $software
+        }
+    }
 
+    $32BitSoftPath = "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
+    $32BitSoftware = @("Keysight IT ESI Group Profile")
+    $32BitInstalled = @()
+    foreach ($software in $32BitSoftware) {
+        $installed = Get-ItemProperty -Path $32BitSoftPath | Where-Object { $_.DisplayName -like "$software*" } | Select-Object -Property DisplayName, DisplayVersion
+        if ($installed) {
+            $32BitInstalled += $installed
+        } else {
+            $missingSoftware += $software
+        }
+    }
+
+    # Output the result
+    Write-Host "$($64BitInstalled.Count + $32BitInstalled.Count)/$($64BitSoftware.Count + $32BitSoftware.Count) Installed"
+
+    if ($missingSoftware.count -gt 0) {
+        Write-Host "Missing Software:" -ForegroundColor Red
+        Write-Host ($missingSoftware -join "`n")
+        $excludedSoftware = @("Forticlient VPN", "Microsoft 365 Apps for enterprise - ja-jp")
+        if (-not ($missingSoftware | Where-Object { $_ -notin $excludedSoftware }).Count -eq 0) {
+            Start-Process softwarecenter:
+        }
+    } else {
+        $shortcuts = Get-PublicShortcuts
+        if ($shortcuts.Exists -contains $False) {
+            Write-Warning "Not all shortcuts are on the desktop. Software may not be installed completely. Please open Software Center and confirm."
+            Write-host "Missing Shortcuts:" -ForegroundColor Red
+            Write-Host $(($shortcuts | Where-Object { !$_.Exists } | Select-Object -ExpandProperty Name) -join "`n")
+        } else {
+            $global:SoftwareInstalled = $True
+            Write-Host "All software is installed." -ForegroundColor Green
+        }
+    }
+    Write-host
+
+    
     Write-host "---- Bit-Locker ----" -ForegroundColor Magenta
     Get-BitLockerStatus
     if ($global:BitLockerEnabled) {
@@ -234,9 +360,18 @@ do {
     if (!$global:BitLockerEnabled -and !$global:BitLockerEncrypting) {
         #Connect to VPN first
         if (!$global:VPNConnected -and $global:VPNRequired) {
+            if (!$global:VPNReset) {
+                do {
+                    $choice = Read-Host "Do you want to reset the VPN? (Y/N): "
+                } until ($choice -match "^[YyNn]$")
+
+                if ($choice -match "^[Yy]$") {
+                    Reset-VPN
+                }
+            }
             Write-host "Connect to VPN to enable Bit-Locker or press 'S' to skip"
             Start-Process -FilePath "C:\Program Files\Palo Alto Networks\GlobalProtect\PanGPA.exe"
-            while ($VPNStatus -ne "Up") {
+            while ($VPNStatus) {
                 $VPNStatus = Get-VPNStatus
                 Start-Sleep -Seconds 3
                 Watch-SkipKey
@@ -247,60 +382,89 @@ do {
             Read-Host -Prompt "Press ENTER to continue once Bit-Locker Encryption has started"
         }
     }
-
-    ## SOFTWARE CHECK ##
-    Write-Host "---- Software ----" -ForegroundColor Magenta
-    $missingSoftware = @()
-    $64BitSoftPath = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*"
-    $64BitSoftware = @("FortiClient VPN", "GlobalProtect", "Microsoft 365 Apps for enterprise")
-    $64BitInstalled = @()
-    foreach ($software in $64BitSoftware) {
-        $installed = Get-ItemProperty -Path $64BitSoftPath | Where-Object { $_.DisplayName -like "$software*" } | Select-Object -Property DisplayName, DisplayVersion
-        if ($installed) {
-            $64BitInstalled += $installed
-        }
-        else {
-            $missingSoftware += $software
-        }
-    }
-
-    $32BitSoftPath = "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
-    $32BitSoftware = @("Keysight IT ESI Group Profile")
-    $32BitInstalled = @()
-    foreach ($software in $32BitSoftware) {
-        $installed = Get-ItemProperty -Path $32BitSoftPath | Where-Object { $_.DisplayName -like "$software*" } | Select-Object -Property DisplayName, DisplayVersion
-        if ($installed) {
-            $32BitInstalled += $installed
-        }
-        else {
-            $missingSoftware += $software
-        }
-    }
-
-    # Output the result
-    Write-Host "$($64BitInstalled.Count + $32BitInstalled.Count)/$($64BitSoftware.Count + $32BitSoftware.Count) Installed"
-
-    if (($64BitInstalled.Count -lt $64BitSoftware.Count) -or ($32BitInstalled.Count -lt $32BitSoftware.Count)) {
-        Write-Host "Missing Software:" -ForegroundColor Red
-        Write-Host ($missingSoftware -join "`n")
-        if ($missingSoftware -ne @("FortiClient VPN")) {
-            Start-Process softwarecenter:
-        }
-    }
-    else {
-        $shortcuts = Get-PublicShortcuts
-        if ($shortcuts.Exists -contains $False) {
-            Write-Warning "Not all shortcuts are on the desktop. Software may not be installed completely. Please open Software Center and confirm."
-            Write-host "Missing Shortcuts:" -ForegroundColor Red
-            Write-Host $(($shortcuts | Where-Object { !$_.Exists } | Select-Object -ExpandProperty Name) -join "`n")
-        }
-        else {
-            $global:SoftwareInstalled = $True
-            Write-Host "All software is installed." -ForegroundColor Green
-        }
-    }
     Write-host
 
+    if ($global:Country -eq "Japan") {
+        Write-host "#### Japan Profile Checks ####" -ForegroundColor Cyan
+        <#
+        Check Install Langs and order
+        Check JapanKB
+        Check IMEKPDictFiles
+        Check Region
+        Check and Set Timezone
+        #>
+
+        #Installed langs and order check
+        $langList = Get-WinUserLanguageList
+        $jpinstalled = $False
+        if ("ja" -in ($langList | Select-Object -ExpandProperty "LanguageTag")) {
+            $jpinstalled = $true
+            if (($langlist | Select-Object -ExpandProperty "LanguageTag" -First 1) -ne "ja") {
+                Write-host "Japanese Language pack is installed but is not set as priority" -ForegroundColor Yellow
+                Start-Process ms-settings:regionlanguage
+            }
+            else {
+                Write-host "Japanese Language pack is installed and set as priority" -ForegroundColor Green
+            }
+        }
+        else {
+            Write-host "Japanese Language Pack is not installed" -ForegroundColor Red
+            Start-Process ms-settings:regionlanguage
+            $jpinstalled = $False
+        }
+
+        if ($jpinstalled) {
+            #JapanKB Check
+            $layerDriver = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\i8042prt\Parameters" -Name "LayerDriver JPN" | Select-Object -ExpandProperty "LayerDriver JPN") -eq "kbd106.dll"
+            $layoutFile = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Keyboard Layouts\00000411" -Name "Layout File" | Select-Object -ExpandProperty "Layout File") -eq "KBD106.dll"
+            if (!$layerDriver -or !$layoutFile) {
+                $jpkb = Set-JapanKB
+                switch ($jpkb) {
+                    $true { Write-host "Successfully set JP Keyboard DLLs. Pending Restart" }
+                    $false { Write-host "Failed to set JP Keyboard DLLs" }
+                    Default { Write-host "Nothing was returned" }
+                }
+            }
+            else {
+                Write-host "Japan Keyboard DLLs already set correctly" -ForegroundColor Green
+            }
+
+            #IMEJPDictFiles Check
+            $DictFilesExist = Get-IMEJPDictFiles
+            if ($DictFilesExist){
+                Write-host "Dict Files: $($DictFilesExist)" -ForegroundColor Green
+            } else {
+                Write-host "Dict Files: $($DictFilesExist)" -ForegroundColor Red
+            }
+        }
+
+        #Region Check
+        $region = Get-SetRegion
+        if ($region -eq "JP") {
+            Write-Host "Region set to Japan" -ForegroundColor Green
+        }
+        else {
+            Write-host "Region Incorrectly set to $region" -ForegroundColor Red
+            Set-WinHomeLocation -GeoId 122 #Set region to Japan
+            $region = Get-SetRegion
+            if ($region -eq "JP"){
+                Write-Host "Successfully set region to $region"
+            } else {
+                Write-Host "Failed to set region. Current Region $region"
+            }
+        }
+
+        $timezone = Get-TimeZone
+        if ($timezone.Id -ne "Tokyo Standard Time") {
+            Set-TimeZone -Id "Tokyo Standard Time"
+            Write-host "Changed Timezone to JST" -ForegroundColor Green
+        }
+        else {
+            Write-host "Timezone Set Correctly" -ForegroundColor Green
+        }
+        Write-host
+
+    }
 
     ## OUTLOOK CHECK ##
     Write-Host "---- Outlook ----" -ForegroundColor Magenta
@@ -316,6 +480,15 @@ do {
                 $global:OutlookLoggedIn = $True
                 Write-Host "$emailAccount" -ForegroundColor Green
             }
+        }
+
+        #Check preferred office lang
+        $preferredOffLang = Get-ItemProperty -Path "HKCU:\Software\Microsoft\Office\16.0\Common\LanguageResources" -Name "UILanguageTag" | Select-Object -ExpandProperty "UILanguageTag"
+        if ($preferredOffLang -ne "ja-jp") {
+            Write-host "Preferred Office Lang set to $preferredOffLang" -ForegroundColor Red
+        }
+        else {
+            Write-host "Preferred Office Lang set to $preferredOffLang" -ForegroundColor Green
         }
     }
     else {
