@@ -1,8 +1,30 @@
-############################
-# Powershell Console Check #
-############################
+################################
+# Powershell Environment Check #
+################################
 if ($host.Name -ne "ConsoleHost") {
-    Start-Process "$Env:SystemRoot\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-Command ""iwr 'https://shorturl.at/nQ7Q8' | iex""" -Verb RunAs
+    try {
+        $path = "$Env:SystemRoot\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
+        Start-Process -FilePath $path -ArgumentList "-Command ""iwr 'https://shorturl.at/nQ7Q8' | iex""" -Verb RunAs
+    }
+    catch {
+        $path = "$Env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+        Start-Process -FilePath $path -ArgumentList "-Command ""iwr 'https://shorturl.at/nQ7Q8' | iex""" -Verb RunAs
+    }
+}
+
+
+$Admin = [bool]([System.Security.Principal.WindowsPrincipal] [System.Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+$64Bit = [System.Environment]::Is64BitProcess
+if (!$Admin) {
+    Clear-Host
+    Write-Host "Please run this script with administrator permissions" -ForegroundColor Red
+    Read-Host
+    Exit
+}
+elseif (!$64Bit) {
+    Clear-Host
+    Write-Host "This is not running in 64-Bit environment, please reopen with 64-Bit Powershell" -ForegroundColor Red
+    Read-Host
     Exit
 }
 
@@ -10,14 +32,27 @@ if ($host.Name -ne "ConsoleHost") {
 # Global Variables #
 ####################
 
-
-Write-Host "Choose a country profile:`n1. Japan`n2. No Profile (Default)"
+Clear-Host
+$countries = @("Japan", "None (Default)")
+Write-Host "Choose a country profile:"
+for ($i = 0; $i -lt $countries.Count; $i++) {
+    Write-Host "$($i + 1): $($countries[$i])"
+}
 $CountrySelect = Read-Host -Prompt "Choice"
 
 switch ($CountrySelect) {
     "1" { $global:Country = "Japan" }
     "2" { $global:Country = "Default" }
     Default { $global:Country = "Default" }
+}
+
+if ($global:Country -ne "Default"){
+    Clear-Host
+    Write-Warning -Message "Are you sure? This script will make many changes to this client specifically for $global:Country"
+    $confirm = Read-Host -Prompt "Type 'confirm'"
+    if ($confirm -ne "confirm"){
+        exit
+    }
 }
 
 $global:VPNRequired = $True
@@ -27,12 +62,14 @@ $global:BitLockerEnabled = $False
 $global:BitLockerEncrypting = $False
 $global:BitLockerPercentage = 0
 $global:WorkAccountAdded = $False
+$global:WorkAccountStatus = $False
 $global:VPNCertsExist = $False
 $global:OutlookLoggedIn = $False
 $global:OneDriveLoggedIn = $False
 $global:SoftwareInstalled = $False
 $global:StepSkipped = $False
 
+$host.UI.RawUI.WindowTitle = "KSWin11Setup - $global:country"
 
 #############
 # Functions #
@@ -168,9 +205,11 @@ do {
 
     $global:VPNReset = $False
 
+    $serial = (Get-WmiObject -Class Win32_BIOS).SerialNumber
     Write-Host "=+=+=+=+=+=+=+="
     Write-Host "User: $env:username" -ForegroundColor Cyan
-    Write-Host "Serial: $((Get-WmiObject -Class Win32_BIOS).SerialNumber)" -ForegroundColor Cyan
+    Write-Host "Serial: $serial" -ForegroundColor Cyan
+    Write-host "ComputerName: $env:computername" -ForegroundColor $(if ($serial -eq $env:computername) {"Green"} else {"Red"})
     Write-Host "=+=+=+=+=+=+=+="
     Write-Host
 
@@ -196,6 +235,7 @@ do {
         }
 
         if (-not $ksping) {
+            Write-Host "Connection Failed to Keysight Network"
             $global:VPNRequired = $True
         }
     }
@@ -239,6 +279,12 @@ do {
                 write-host $account.tostring().split(",")[-2].trim()
             }
         }
+    }
+    $workaccountstatus = dsregcmd /Status
+    $workaccountstatus |
+    Select-String -Pattern "(Workplace|Domain)joined" |
+    ForEach-Object {
+        Write-Host $_.Line.trim() -ForegroundColor $(if ($_.Line.Trim().split(' : ')[-1] -eq "YES") { "Green" } else { "Red" })
     }
     Write-Host
 
@@ -290,7 +336,8 @@ do {
         $installed = Get-ItemProperty -Path $64BitSoftPath | Where-Object { $_.DisplayName -like "$software*" } | Select-Object -Property DisplayName, DisplayVersion
         if ($installed) {
             $64BitInstalled += $installed
-        } else {
+        }
+        else {
             $missingSoftware += $software
         }
     }
@@ -302,7 +349,8 @@ do {
         $installed = Get-ItemProperty -Path $32BitSoftPath | Where-Object { $_.DisplayName -like "$software*" } | Select-Object -Property DisplayName, DisplayVersion
         if ($installed) {
             $32BitInstalled += $installed
-        } else {
+        }
+        else {
             $missingSoftware += $software
         }
     }
@@ -317,13 +365,15 @@ do {
         if (-not ($missingSoftware | Where-Object { $_ -notin $excludedSoftware }).Count -eq 0) {
             Start-Process softwarecenter:
         }
-    } else {
+    }
+    else {
         $shortcuts = Get-PublicShortcuts
         if ($shortcuts.Exists -contains $False) {
             Write-Warning "Not all shortcuts are on the desktop. Software may not be installed completely. Please open Software Center and confirm."
             Write-host "Missing Shortcuts:" -ForegroundColor Red
             Write-Host $(($shortcuts | Where-Object { !$_.Exists } | Select-Object -ExpandProperty Name) -join "`n")
-        } else {
+        }
+        else {
             $global:SoftwareInstalled = $True
             Write-Host "All software is installed." -ForegroundColor Green
         }
@@ -431,9 +481,10 @@ do {
 
             #IMEJPDictFiles Check
             $DictFilesExist = Get-IMEJPDictFiles
-            if ($DictFilesExist){
+            if ($DictFilesExist) {
                 Write-host "Dict Files: $($DictFilesExist)" -ForegroundColor Green
-            } else {
+            }
+            else {
                 Write-host "Dict Files: $($DictFilesExist)" -ForegroundColor Red
             }
         }
@@ -447,9 +498,10 @@ do {
             Write-host "Region Incorrectly set to $region" -ForegroundColor Red
             Set-WinHomeLocation -GeoId 122 #Set region to Japan
             $region = Get-SetRegion
-            if ($region -eq "JP"){
+            if ($region -eq "JP") {
                 Write-Host "Successfully set region to $region"
-            } else {
+            }
+            else {
                 Write-Host "Failed to set region. Current Region $region"
             }
         }
@@ -483,12 +535,14 @@ do {
         }
 
         #Check preferred office lang
-        $preferredOffLang = Get-ItemProperty -Path "HKCU:\Software\Microsoft\Office\16.0\Common\LanguageResources" -Name "UILanguageTag" | Select-Object -ExpandProperty "UILanguageTag"
-        if ($preferredOffLang -ne "ja-jp") {
-            Write-host "Preferred Office Lang set to $preferredOffLang" -ForegroundColor Red
-        }
-        else {
-            Write-host "Preferred Office Lang set to $preferredOffLang" -ForegroundColor Green
+        if ($global:Country -eq "Japan") {
+            $preferredOffLang = Get-ItemProperty -Path "HKCU:\Software\Microsoft\Office\16.0\Common\LanguageResources" -Name "UILanguageTag" | Select-Object -ExpandProperty "UILanguageTag"
+            if ($preferredOffLang -ne "ja-jp") {
+                Write-host "Preferred Office Lang set to $preferredOffLang" -ForegroundColor Red
+            }
+            else {
+                Write-host "Preferred Office Lang set to $preferredOffLang" -ForegroundColor Green
+            }
         }
     }
     else {
