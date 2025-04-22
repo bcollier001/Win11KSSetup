@@ -28,32 +28,44 @@ elseif (!$64Bit) {
     Exit
 }
 
-####################
-# Global Variables #
-####################
 
-Clear-Host
-$countries = @("Japan", "None (Default)")
-Write-Host "Choose a country profile:"
-for ($i = 0; $i -lt $countries.Count; $i++) {
-    Write-Host "$($i + 1): $($countries[$i])"
+
+#####################
+# Profile Selection #
+#####################
+
+$profiles = @(
+    @{Name="Default"; ID=1; Description="Default profile for most Keysight setups"},
+    @{Name="ESI Global"; ID=2; Description="Non-country-specific profile for Keysight-ESI machines"},
+    @{Name="ESI Japan"; ID=3; Description="Japan specific profile for Keysight-ESI machines"}
+)
+
+$host.UI.RawUI.WindowTitle = "Select a Setup Profile"
+$profileattempts = 0
+do {
+    Clear-Host; Write-host "Select a Setup Profile" -ForegroundColor Green
+    foreach ($profile in $profiles){
+        Write-host "$($profile.ID). " -ForegroundColor Green -NoNewline; Write-Host "$($profile.Name)" -ForegroundColor Yellow -NoNewline; Write-host ": $($profile.Description)"
+    }
+    Write-Host
+    if ($profileattempts -gt 0) {Write-host "Invalid Selection, Try again (Numbers Only)" -ForegroundColor Red}
+    $ProfileSelection = Read-Host -Prompt "Profile"
+    $profileattempts++
+} until (($ProfileSelection -as [int] -ge 0) -and ($ProfileSelection -le $profiles.Count))
+Write-host "Profile Selection: $($ProfileSelection -as [int])"
+switch ($ProfileSelection -as [int]) {
+    "0" { $global:SelectedProfile = $Profiles[0] }
+    Default { $global:SelectedProfile = $Profiles[$ProfileSelection-1] }
 }
-$CountrySelect = Read-Host -Prompt "Choice"
-
-switch ($CountrySelect) {
-    "1" { $global:Country = "Japan" }
-    "2" { $global:Country = "Default" }
-    Default { $global:Country = "Default" }
-}
-
-if ($global:Country -ne "Default"){
+if ($global:SelectedProfile.ID -ne 1){ #If Not Default
     Clear-Host
-    Write-Warning -Message "Are you sure? This script will make many changes to this client specifically for $global:Country"
+    Write-Warning -Message "Are you sure? This script will make many changes to this client specifically for $($global:SelectedProfile.Name)"
     $confirm = Read-Host -Prompt "Type 'confirm'"
     if ($confirm -ne "confirm"){
         exit
     }
 }
+$host.UI.RawUI.WindowTitle = "KSWin11Setup - $($global:SelectedProfile.Name)"
 
 $global:VPNRequired = $True
 $global:VPNConnected = $False
@@ -68,8 +80,6 @@ $global:OutlookLoggedIn = $False
 $global:OneDriveLoggedIn = $False
 $global:SoftwareInstalled = $False
 $global:StepSkipped = $False
-
-$host.UI.RawUI.WindowTitle = "KSWin11Setup - $global:country"
 
 #############
 # Functions #
@@ -329,8 +339,9 @@ do {
     Write-Host "---- Software ----" -ForegroundColor Magenta
     $missingSoftware = @()
     $64BitSoftPath = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*"
-    $64BitSoftware = @("FortiClient VPN", "GlobalProtect", "Microsoft 365 Apps for enterprise")
-    if ($global:Country -eq "Japan") { $64BitSoftware += "Microsoft 365 Apps for enterprise - ja-jp" }
+    $64BitSoftware = @("Microsoft 365 Apps for enterprise")
+    if ($global:SelectedProfile.Name -match "*ESI*"){$64BitSoftware += @("FortiClient VPN", "GlobalProtect")} #Any ESI Profile
+    if ($global:SelectedProfile.ID -eq 3) { $64BitSoftware += "Microsoft 365 Apps for enterprise - ja-jp" } #Japan
     $64BitInstalled = @()
     foreach ($software in $64BitSoftware) {
         $installed = Get-ItemProperty -Path $64BitSoftPath | Where-Object { $_.DisplayName -like "$software*" } | Select-Object -Property DisplayName, DisplayVersion
@@ -434,7 +445,7 @@ do {
     }
     Write-host
 
-    if ($global:Country -eq "Japan") {
+    if ($global:SelectedProfile.ID -eq 3) { #ESI Japan
         Write-host "#### Japan Profile Checks ####" -ForegroundColor Cyan
         <#
         Check Install Langs and order
@@ -535,7 +546,7 @@ do {
         }
 
         #Check preferred office lang
-        if ($global:Country -eq "Japan") {
+        if ($global:SelectedProfile.ID -eq 3) { #ESI Japan
             $preferredOffLang = Get-ItemProperty -Path "HKCU:\Software\Microsoft\Office\16.0\Common\LanguageResources" -Name "UILanguageTag" | Select-Object -ExpandProperty "UILanguageTag"
             if ($preferredOffLang -ne "ja-jp") {
                 Write-host "Preferred Office Lang set to $preferredOffLang" -ForegroundColor Red
