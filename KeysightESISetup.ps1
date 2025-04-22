@@ -340,7 +340,7 @@ do {
     $missingSoftware = @()
     $64BitSoftPath = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*"
     $64BitSoftware = @("Microsoft 365 Apps for enterprise")
-    if ($global:SelectedProfile.Name -match "*ESI*"){$64BitSoftware += @("FortiClient VPN", "GlobalProtect")} #Any ESI Profile
+    if ($global:SelectedProfile.Name -match ".*ESI.*"){$64BitSoftware += @("FortiClient VPN", "GlobalProtect")} #Any ESI Profile
     if ($global:SelectedProfile.ID -eq 3) { $64BitSoftware += "Microsoft 365 Apps for enterprise - ja-jp" } #Japan
     $64BitInstalled = @()
     foreach ($software in $64BitSoftware) {
