@@ -651,6 +651,8 @@ do {
     # Prompt user for restart
     Write-Host "Press 'R' to restart the script or any other key to exit."
 
-    # Check for key press
-    $key = $Host.UI.RawUI.ReadKey("NoEcho, IncludeKeyDown").Character
+   # Check for key press
+    do {
+        $key = $Host.UI.RawUI.ReadKey("NoEcho, IncludeKeyDown").Character
+    } until ($key -ne 0)
 } while ($key -ieq 'r')
