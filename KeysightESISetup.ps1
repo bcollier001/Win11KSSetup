@@ -205,6 +205,21 @@ function Get-SetRegion {
 
 #Set-TimeZone -Id "Tokyo Standard Time"
 
+######################
+# Keep Machine Awake #
+######################
+Clear-Host
+$KeepAwake = Read-Host -Prompt "Keep Computer Awake? (Y/N) (Default: Y)"
+switch ($KeepAwake.ToUpper()) {
+    "N" { continue }
+    Default {
+        Start-Process powershell.exe -ArgumentList @(
+        "-NoExit",
+        "-Command",
+        'Write-Host \"Keeping Computer Awake... (close me to allow sleep)\"; $wshell = New-Object -ComObject WScript.Shell; while ($true) { $wshell.SendKeys(\"{SCROLLLOCK}\"); Start-Sleep -Milliseconds 100; $wshell.SendKeys(\"{SCROLLLOCK}\"); Start-Sleep -Seconds 30; }'
+        ) -WindowStyle Minimized
+    }
+}
 #############
 # Main Loop #
 #############
